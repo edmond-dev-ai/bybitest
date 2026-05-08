@@ -8,6 +8,7 @@ from scipy.stats import norm
 from datetime import datetime, timezone
 import websocket as ws_client
 import urllib.request
+import os
 
 clients = set()
 state = {
@@ -56,13 +57,11 @@ async def _broadcast(data):
     clients.difference_update(dead)
 
 def fetch_open_price():
-    """Fetch the real current 5m candle open price from Bybit REST API"""
     try:
-        url = "https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=5&limit=1"
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1"
         with urllib.request.urlopen(url, timeout=5) as response:
             data = json.loads(response.read())
-            candle = data["result"]["list"][0]
-            open_price = float(candle[1])
+            open_price = float(data[0][1])
             print(f"*** REST open price fetched: ${open_price:,.2f} ***")
             return open_price
     except Exception as e:
@@ -83,53 +82,52 @@ def on_kline(ws, message):
 
 def on_trade(ws, message):
     data = json.loads(message)
-    if "data" not in data:
+    if not data or "k" not in data:
         return
-    for tick in data["data"]:
-        price = float(tick["p"])
-        state["price"] = price
-        state["history"].append(price)
-        if len(state["history"]) > 300:
-            state["history"].pop(0)
 
-        strike = state["strike"]
-        if strike is None:
-            return
+    kline = data["k"]
+    price = float(kline["c"])
 
-        secs_left = secs_remaining_5m()
-        sigma = calc_volatility()
-        c_up, c_down = calc_c(price, strike, secs_left, sigma)
-        if c_up is None:
-            return
+    state["price"] = price
+    state["history"].append(price)
+    if len(state["history"]) > 300:
+        state["history"].pop(0)
 
-        diff = round(price - strike, 2)
-        direction = "UP" if price >= strike else "DOWN"
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+    strike = state["strike"]
+    if strike is None:
+        return
 
-        print(f"[{ts}] ${price:,.2f}  {diff:+.2f}  |  "
-              f"5m: {secs_left//60}:{secs_left%60:02d}  |  "
-              f"Strike: ${strike:,.2f}  |  UP: {c_up}¢  DOWN: {c_down}¢")
+    secs_left = secs_remaining_5m()
+    sigma = calc_volatility()
+    c_up, c_down = calc_c(price, strike, secs_left, sigma)
+    if c_up is None:
+        return
 
-        broadcast_sync({
-    "price": price,
-    "strike": strike,
-    "diff": diff,
-    "secs_left": secs_left,
-    "c_up": c_up,
-    "c_down": c_down,
-    "direction": direction,
-    "ts": ts,
-    "unix_ms": int(datetime.now(timezone.utc).timestamp() * 1000)
-})
+    diff = round(price - strike, 2)
+    direction = "UP" if price >= strike else "DOWN"
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+
+    print(f"[{ts}] ${price:,.2f}  {diff:+.2f}  |  "
+          f"5m: {secs_left//60}:{secs_left%60:02d}  |  "
+          f"Strike: ${strike:,.2f}  |  UP: {c_up}¢  DOWN: {c_down}¢")
+
+    broadcast_sync({
+        "price": price,
+        "strike": strike,
+        "diff": diff,
+        "secs_left": secs_left,
+        "c_up": c_up,
+        "c_down": c_down,
+        "direction": direction,
+        "ts": ts,
+        "unix_ms": int(datetime.now(timezone.utc).timestamp() * 1000)
+    })
 
 def connect_kline():
     ws = ws_client.WebSocketApp(
-        "wss://stream.bybit.com/v5/public/spot",
+        "wss://stream.binance.com:9443/ws/btcusdt@kline_5m",
         on_message=on_kline,
-        on_open=lambda ws: ws.send(json.dumps({
-            "op": "subscribe",
-            "args": ["kline.5.BTCUSDT"]
-        })),
+        on_open=lambda ws: print("Kline connected..."),
         on_error=lambda ws, e: print(f"Kline error: {e}"),
         on_close=lambda ws, c, m: (print("Kline closed — reconnecting..."), time.sleep(3), connect_kline())
     )
@@ -137,19 +135,15 @@ def connect_kline():
 
 def connect_trade():
     ws = ws_client.WebSocketApp(
-        "wss://stream.bybit.com/v5/public/spot",
+        "wss://stream.binance.com:9443/ws/btcusdt@kline_1m",
         on_message=on_trade,
-        on_open=lambda ws: ws.send(json.dumps({
-            "op": "subscribe",
-            "args": ["publicTrade.BTCUSDT"]
-        })),
+        on_open=lambda ws: print("Trade stream connected..."),
         on_error=lambda ws, e: print(f"Trade error: {e}"),
         on_close=lambda ws, c, m: (print("Trade closed — reconnecting..."), time.sleep(3), connect_trade())
     )
     ws.run_forever(ping_interval=20, ping_timeout=10)
 
 def fetch_initial_strike():
-    """On startup fetch the current candle open immediately"""
     print("Fetching initial strike from REST...")
     open_price = fetch_open_price()
     if open_price:
@@ -177,8 +171,9 @@ async def main():
     threading.Thread(target=connect_kline, daemon=True).start()
     threading.Thread(target=connect_trade, daemon=True).start()
 
-    print("Server running on ws://localhost:8765")
-    async with websockets.serve(handler, "localhost", 8765):
+    PORT = int(os.environ.get("PORT", 8765))
+    print(f"Server running on port {PORT}")
+    async with websockets.serve(handler, "0.0.0.0", PORT):
         await asyncio.Future()
 
 if __name__ == "__main__":
