@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BTC Polymarket Tracker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f0f; color: #f0f0f0; font-family: monospace; padding: 2rem; }
+    h1 { font-size: 14px; color: #555; margin-bottom: 2rem; letter-spacing: 0.1em; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.25rem; }
+    .card-label { font-size: 11px; color: #555; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .card-value { font-size: 26px; font-weight: bold; }
+    .card-sub { font-size: 12px; color: #555; margin-top: 4px; }
+
+    .up { color: #22c55e; }
+    .down { color: #ef4444; }
+    .neutral { color: #f0f0f0; }
+
+    .bar-section { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+    .bar-labels { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 10px; }
+    .bar-track { height: 28px; background: #2a2a2a; border-radius: 4px; overflow: hidden; display: flex; }
+    .bar-up { background: #22c55e; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: #000; }
+    .bar-down { background: #ef4444; flex: 1; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: #fff; }
+
+    .c-values { display: flex; justify-content: space-between; margin-top: 10px; }
+    .c-up { font-size: 22px; font-weight: bold; color: #22c55e; }
+    .c-down { font-size: 22px; font-weight: bold; color: #ef4444; }
+
+    .status { font-size: 11px; color: #444; margin-top: 2rem; }
+    .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #444; margin-right: 6px; }
+    .dot.live { background: #22c55e; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  </style>
+</head>
+<body>
+
+<h1>BTC / POLYMARKET — 5M TRACKER</h1>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-label">BTC Price</div>
+    <div class="card-value neutral" id="price">—</div>
+    <div class="card-sub" id="diff">waiting...</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Strike (5m open)</div>
+    <div class="card-value neutral" id="strike">—</div>
+    <div class="card-sub" id="direction">—</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Time Remaining</div>
+    <div class="card-value neutral" id="countdown">—</div>
+    <div class="card-sub">in current 5m candle</div>
+  </div>
+</div>
+
+<div class="bar-section">
+  <div class="bar-labels">
+    <span>UP (YES above strike)</span>
+    <span>DOWN (YES below strike)</span>
+  </div>
+  <div class="bar-track">
+    <div class="bar-up" id="bar-up" style="width: 50%">50¢</div>
+    <div class="bar-down" id="bar-down">50¢</div>
+  </div>
+  <div class="c-values">
+    <span class="c-up" id="c-up">—</span>
+    <span class="c-down" id="c-down">—</span>
+  </div>
+</div>
+
+<div class="status">
+  <span class="dot" id="dot"></span>
+  <span id="status-text">Connecting to local server...</span>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id)
+
+  // offset between server UTC and browser clock
+  let serverOffset = 0
+
+  function getServerUtcMs() {
+    return Date.now() + serverOffset
+  }
+
+  function secsRemaining() {
+    const utcMs = getServerUtcMs()
+    const totalSecs = Math.floor(utcMs / 1000)
+    return 300 - (totalSecs % 300)
+  }
+
+  function fmt(secs) {
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
+
+  setInterval(() => {
+    $('countdown').textContent = fmt(secsRemaining())
+  }, 1000)
+
+  $('countdown').textContent = fmt(secsRemaining())
+
+  function connect() {
+    const ws = new WebSocket('ws://localhost:8765')
+
+    ws.onopen = () => {
+      $('dot').classList.add('live')
+      $('status-text').textContent = 'Connected — receiving ticks'
+    }
+
+    ws.onmessage = (e) => {
+      const d = JSON.parse(e.data)
+
+      // sync clock on every tick using server unix timestamp
+      if (d.unix_ms) {
+        serverOffset = d.unix_ms - Date.now()
+      }
+
+      $('price').textContent = '$' + d.price.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
+      $('price').className = 'card-value ' + (d.direction === 'UP' ? 'up' : 'down')
+
+      $('strike').textContent = '$' + d.strike.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})
+      $('diff').textContent = (d.diff >= 0 ? '+' : '') + d.diff.toFixed(2)
+      $('diff').style.color = d.diff >= 0 ? '#22c55e' : '#ef4444'
+
+      $('direction').textContent = d.direction
+      $('direction').style.color = d.direction === 'UP' ? '#22c55e' : '#ef4444'
+
+      $('bar-up').style.width = d.c_up + '%'
+      $('bar-up').textContent = d.c_up + '¢'
+      $('bar-down').textContent = d.c_down + '¢'
+
+      $('c-up').textContent = 'UP  ' + d.c_up + '¢'
+      $('c-down').textContent = 'DOWN  ' + d.c_down + '¢'
+
+      $('status-text').textContent = `Last tick: ${d.ts}`
+    }
+
+    ws.onclose = () => {
+      $('dot').classList.remove('live')
+      $('status-text').textContent = 'Disconnected — retrying...'
+      setTimeout(connect, 3000)
+    }
+  }
+
+  connect()
+</script>
+</body>
+</html>
