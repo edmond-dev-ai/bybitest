@@ -58,7 +58,7 @@ async def _broadcast(data):
 
 def fetch_open_price():
     try:
-        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1"
+        url = "https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1"
         with urllib.request.urlopen(url, timeout=5) as response:
             data = json.loads(response.read())
             open_price = float(data[0][1])
@@ -67,6 +67,16 @@ def fetch_open_price():
     except Exception as e:
         print(f"REST fetch error: {e}")
         return None
+
+def fetch_initial_strike():
+    print("Fetching initial strike from REST...")
+    open_price = fetch_open_price()
+    if open_price:
+        state["strike"] = open_price
+        state["bucket"] = get_bucket_5m()
+        print(f"Initial strike set: ${open_price:,.2f}")
+    else:
+        print("Could not fetch initial strike — waiting for next candle...")
 
 def on_kline(ws, message):
     data = json.loads(message)
@@ -125,7 +135,7 @@ def on_trade(ws, message):
 
 def connect_kline():
     ws = ws_client.WebSocketApp(
-        "wss://stream.binance.com:9443/ws/btcusdt@kline_5m",
+        "wss://stream.binance.us:9443/ws/btcusdt@kline_5m",
         on_message=on_kline,
         on_open=lambda ws: print("Kline connected..."),
         on_error=lambda ws, e: print(f"Kline error: {e}"),
@@ -135,23 +145,13 @@ def connect_kline():
 
 def connect_trade():
     ws = ws_client.WebSocketApp(
-        "wss://stream.binance.com:9443/ws/btcusdt@kline_1m",
+        "wss://stream.binance.us:9443/ws/btcusdt@kline_1m",
         on_message=on_trade,
         on_open=lambda ws: print("Trade stream connected..."),
         on_error=lambda ws, e: print(f"Trade error: {e}"),
         on_close=lambda ws, c, m: (print("Trade closed — reconnecting..."), time.sleep(3), connect_trade())
     )
     ws.run_forever(ping_interval=20, ping_timeout=10)
-
-def fetch_initial_strike():
-    print("Fetching initial strike from REST...")
-    open_price = fetch_open_price()
-    if open_price:
-        state["strike"] = open_price
-        state["bucket"] = get_bucket_5m()
-        print(f"Initial strike set: ${open_price:,.2f}")
-    else:
-        print("Could not fetch initial strike — waiting for next candle...")
 
 async def handler(websocket):
     clients.add(websocket)
