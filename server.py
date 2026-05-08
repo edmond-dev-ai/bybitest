@@ -58,7 +58,7 @@ async def _broadcast(data):
 
 def fetch_open_price():
     try:
-        url = "https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1"
+        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=1"
         with urllib.request.urlopen(url, timeout=5) as response:
             data = json.loads(response.read())
             open_price = float(data[0][1])
@@ -135,7 +135,7 @@ def on_trade(ws, message):
 
 def connect_kline():
     ws = ws_client.WebSocketApp(
-        "wss://stream.binance.us:9443/ws/btcusdt@kline_5m",
+        "wss://stream.binance.com:9443/ws/btcusdt@kline_5m",
         on_message=on_kline,
         on_open=lambda ws: print("Kline connected..."),
         on_error=lambda ws, e: print(f"Kline error: {e}"),
@@ -145,7 +145,7 @@ def connect_kline():
 
 def connect_trade():
     ws = ws_client.WebSocketApp(
-        "wss://stream.binance.us:9443/ws/btcusdt@kline_1m",
+        "wss://stream.binance.com:9443/ws/btcusdt@kline_1m",
         on_message=on_trade,
         on_open=lambda ws: print("Trade stream connected..."),
         on_error=lambda ws, e: print(f"Trade error: {e}"),
