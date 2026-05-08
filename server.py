@@ -80,7 +80,10 @@ def fetch_initial_strike():
 
 def on_kline(ws, message):
     data = json.loads(message)
-    if "data" not in data:
+    if "k" not in data:
+        return
+    kline = data["k"]
+    if not kline["x"]:
         return
     b = get_bucket_5m()
     if state["bucket"] != b:
