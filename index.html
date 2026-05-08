@@ -105,7 +105,7 @@
   $('countdown').textContent = fmt(secsRemaining())
 
   function connect() {
-    const ws = new WebSocket('ws://localhost:8765')
+    const ws = new WebSocket('wss://web-production-87391.up.railway.app')
 
     ws.onopen = () => {
       $('dot').classList.add('live')
